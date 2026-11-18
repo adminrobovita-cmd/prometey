@@ -6,8 +6,20 @@ services:
 
     environment:
       POSTGRES_USER: prometey
-      POSTGRES_PASSWORD: prometey_dev_robovita_1745171126
-      POSTGRES_BD: prometey
+      POSTGRES_PASSWORD: prometey_dev_password
+      POSTGRES_DB: prometey
 
-    ports: 
+    ports:
       - "127.0.0.1:5432:5432"
+
+    volumes:
+      - prometey_postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prometey -d prometey"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  prometey_postgres_data:
