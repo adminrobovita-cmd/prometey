@@ -725,3 +725,69 @@ ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_organizationId_fkey" FOREIGN
 
 -- AddForeignKey
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- Additional PostgreSQL constraints for ПРОМЕТЕЙ.
+-- Apply after the initial Prisma migration.
+
+ALTER TABLE "organizations"
+  ADD CONSTRAINT "organizations_retention_months_check"
+  CHECK ("telemetryRetentionMonths" BETWEEN 1 AND 120);
+
+ALTER TABLE "devices"
+  ADD CONSTRAINT "devices_offline_timeout_check"
+  CHECK ("offlineAfterSeconds" > 0);
+
+ALTER TABLE "channel_recording_policies"
+  ADD CONSTRAINT "channel_recording_policy_values_check"
+  CHECK (
+    ("mode" = 'INTERVAL' AND "intervalSeconds" IS NOT NULL AND "intervalSeconds" > 0)
+    OR
+    ("mode" = 'ON_CHANGE' AND "changeThreshold" IS NOT NULL AND "changeThreshold" >= 0)
+    OR
+    ("mode" = 'INTERVAL_AND_CHANGE'
+      AND "intervalSeconds" IS NOT NULL AND "intervalSeconds" > 0
+      AND "changeThreshold" IS NOT NULL AND "changeThreshold" >= 0)
+  );
+
+ALTER TABLE "telemetry_records"
+  ADD CONSTRAINT "telemetry_exactly_one_value_check"
+  CHECK (
+    (CASE WHEN "numberValue" IS NULL THEN 0 ELSE 1 END) +
+    (CASE WHEN "booleanValue" IS NULL THEN 0 ELSE 1 END) = 1
+  );
+
+ALTER TABLE "channel_thresholds"
+  ADD CONSTRAINT "threshold_warning_range_check"
+  CHECK ("warningLow" IS NULL OR "warningHigh" IS NULL OR "warningLow" < "warningHigh");
+
+ALTER TABLE "channel_thresholds"
+  ADD CONSTRAINT "threshold_critical_range_check"
+  CHECK ("criticalLow" IS NULL OR "criticalHigh" IS NULL OR "criticalLow" < "criticalHigh");
+
+ALTER TABLE "channel_thresholds"
+  ADD CONSTRAINT "threshold_hysteresis_nonnegative_check"
+  CHECK ("hysteresis" >= 0);
+
+ALTER TABLE "inspection_rules"
+  ADD CONSTRAINT "inspection_rule_interval_check"
+  CHECK ("intervalMinutes" > 0 AND "graceMinutes" >= 0);
+
+ALTER TABLE "monitoring_events"
+  ADD CONSTRAINT "monitoring_event_resolution_check"
+  CHECK (
+    ("status" = 'RESOLVED' AND "resolvedAt" IS NOT NULL)
+    OR ("status" IN ('ACTIVE', 'ACKNOWLEDGED') AND "resolvedAt" IS NULL)
+  );
+
+CREATE UNIQUE INDEX "monitoring_events_active_deduplication_key_key"
+  ON "monitoring_events" ("organizationId", "deduplicationKey")
+  WHERE "status" IN ('ACTIVE', 'ACKNOWLEDGED')
+    AND "deduplicationKey" IS NOT NULL;
+
+-- Cross-table invariants must be checked in the service layer/transaction:
+-- 1. Device.organizationId/siteId/zoneId must refer to the same tenant/site.
+-- 2. Channel.organizationId must match its Device.organizationId.
+-- 3. A UserZoneAccess zone must belong to the membership's organization.
+-- 4. SELECTED_ZONES membership must have at least one UserZoneAccess row.
+-- 5. An RFID card must be active and belong to the same organization as its reader.
+-- 6. Every query for tenant-owned data must be scoped by organizationId.
