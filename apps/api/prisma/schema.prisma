@@ -1,7 +1,5 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// ПРОМЕТЕЙ | Prisma 7.x | PostgreSQL
+// DATABASE_URL задаётся в prisma.config.ts, не в этом файле.
 
 generator client {
   provider = "prisma-client"
@@ -10,4 +8,649 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  BLOCKED
+}
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+enum AccessScope {
+  ORGANIZATION
+  SELECTED_ZONES
+}
+
+enum ZoneType {
+  BOILER_ROOM
+  WORKSHOP
+  BUILDING
+  OTHER
+}
+
+enum DeviceType {
+  BOILER_CONTROLLER
+  TEMPERATURE_CONTROLLER
+  RFID_READER
+  GATEWAY
+  OTHER
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  UNKNOWN
+}
+
+enum ChannelDataType {
+  NUMBER
+  BOOLEAN
+}
+
+enum MeasurementKind {
+  TEMPERATURE
+  PRESSURE
+  PUMP_STATE
+  CONTACT_STATE
+  HUMIDITY
+  OTHER
+}
+
+enum RecordingMode {
+  INTERVAL
+  ON_CHANGE
+  INTERVAL_AND_CHANGE
+}
+
+enum TelemetryQuality {
+  GOOD
+  UNCERTAIN
+  BAD
+}
+
+enum IntegrationProtocol {
+  HTTP
+  MQTT
+  HOME_ASSISTANT
+  MODBUS_TCP
+  MODBUS_RTU
+  OPC_UA
+  MANUAL
+}
+
+enum IntegrationStatus {
+  ENABLED
+  DISABLED
+  ERROR
+}
+
+enum EventType {
+  THRESHOLD
+  DEVICE_OFFLINE
+  SENSOR_ERROR
+  INSPECTION_OVERDUE
+  SYSTEM
+  MANUAL
+}
+
+enum EventSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum EventStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum InspectionMethod {
+  RFID
+  MANUAL
+}
+
+enum InspectionStatus {
+  COMPLETED
+  REJECTED
+}
+
+enum NotificationChannel {
+  TELEGRAM
+  WEB
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  ACCESS_DENIED
+  ACKNOWLEDGE_EVENT
+  RESOLVE_EVENT
+  OTHER
+}
+
+model Organization {
+  id                       String   @id @default(uuid()) @db.Uuid
+  name                     String   @db.VarChar(200)
+  slug                     String   @unique @db.VarChar(100)
+  isActive                 Boolean  @default(true)
+  telemetryRetentionMonths Int      @default(6)
+  createdAt                DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt                DateTime @updatedAt @db.Timestamptz(3)
+
+  sites           Site[]
+  memberships     OrganizationMembership[]
+  connections     IntegrationConnection[]
+  devices         Device[]
+  channels        DeviceChannel[]
+  thresholds      ChannelThreshold[]
+  events          MonitoringEvent[]
+  rfidCards       RfidCard[]
+  inspectionRules InspectionRule[]
+  deliveries      NotificationDelivery[]
+  auditLogs       AuditLog[]
+
+  @@index([isActive, name])
+  @@map("organizations")
+}
+
+model Site {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  name           String   @db.VarChar(200)
+  code           String?  @db.VarChar(80)
+  address        String?  @db.VarChar(500)
+  timeZone       String   @default("Europe/Minsk") @db.VarChar(80)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  zones        Zone[]
+  devices      Device[]
+  connections  IntegrationConnection[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, isActive])
+  @@map("sites")
+}
+
+model Zone {
+  id        String   @id @default(uuid()) @db.Uuid
+  siteId    String   @db.Uuid
+  parentId  String?  @db.Uuid
+  name      String   @db.VarChar(200)
+  code      String?  @db.VarChar(80)
+  type      ZoneType @default(OTHER)
+  notes     String?  @db.Text
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  site            Site              @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  parent          Zone?             @relation("ZoneTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children        Zone[]            @relation("ZoneTree")
+  circuits        HeatingCircuit[]
+  devices         Device[]
+  operatorAccess  UserZoneAccess[]
+  inspectionRules InspectionRule[]
+  events          MonitoringEvent[]
+
+  @@unique([siteId, code])
+  @@index([siteId, isActive])
+  @@index([parentId])
+  @@map("zones")
+}
+
+model HeatingCircuit {
+  id          String   @id @default(uuid()) @db.Uuid
+  zoneId      String   @db.Uuid
+  name        String   @db.VarChar(200)
+  code        String?  @db.VarChar(80)
+  description String?  @db.Text
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  zone    Zone     @relation(fields: [zoneId], references: [id], onDelete: Restrict)
+  devices Device[]
+
+  @@unique([zoneId, code])
+  @@index([zoneId, isActive])
+  @@map("heating_circuits")
+}
+
+model User {
+  id            String     @id @default(uuid()) @db.Uuid
+  email         String     @unique @db.VarChar(320)
+  passwordHash  String     @db.VarChar(255)
+  displayName   String     @db.VarChar(200)
+  phone         String?    @db.VarChar(40)
+  status        UserStatus @default(INVITED)
+  isSystemAdmin Boolean    @default(false)
+  lastLoginAt   DateTime?  @db.Timestamptz(3)
+  createdAt     DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime   @updatedAt @db.Timestamptz(3)
+
+  memberships        OrganizationMembership[]
+  zoneAccess         UserZoneAccess[]
+  telegramAccount    TelegramAccount?
+  acknowledgedEvents MonitoringEvent[]        @relation("EventAcknowledgedBy")
+  inspections        Inspection[]
+  rfidCards          RfidCard[]
+  deliveries         NotificationDelivery[]
+  auditLogs          AuditLog[]
+
+  @@index([status, displayName])
+  @@map("users")
+}
+
+// Одна запись на пользователя в предприятии. Scope=ORGANIZATION даёт доступ
+// ко всему предприятию; SELECTED_ZONES — только к строкам UserZoneAccess.
+model OrganizationMembership {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  userId         String         @db.Uuid
+  role           MembershipRole @default(OPERATOR)
+  scope          AccessScope    @default(SELECTED_ZONES)
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime       @updatedAt @db.Timestamptz(3)
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  zoneAccess   UserZoneAccess[]
+
+  @@unique([organizationId, userId])
+  @@index([userId, isActive])
+  @@index([organizationId, role, isActive])
+  @@map("organization_memberships")
+}
+
+model UserZoneAccess {
+  id           String   @id @default(uuid()) @db.Uuid
+  membershipId String   @db.Uuid
+  userId       String   @db.Uuid
+  zoneId       String   @db.Uuid
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  membership OrganizationMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  zone       Zone                   @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@unique([membershipId, zoneId])
+  @@index([userId, zoneId])
+  @@index([zoneId])
+  @@map("user_zone_access")
+}
+
+model IntegrationConnection {
+  id              String              @id @default(uuid()) @db.Uuid
+  organizationId  String              @db.Uuid
+  siteId          String?             @db.Uuid
+  name            String              @db.VarChar(200)
+  protocol        IntegrationProtocol
+  status          IntegrationStatus   @default(ENABLED)
+  settings        Json?
+  lastError       String?             @db.Text
+  lastConnectedAt DateTime?           @db.Timestamptz(3)
+  createdAt       DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime            @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  site         Site?        @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  devices      Device[]
+
+  @@index([organizationId, protocol, status])
+  @@index([siteId])
+  @@map("integration_connections")
+}
+
+model Device {
+  id                      String       @id @default(uuid()) @db.Uuid
+  organizationId          String       @db.Uuid
+  siteId                  String       @db.Uuid
+  zoneId                  String       @db.Uuid
+  heatingCircuitId        String?      @db.Uuid
+  integrationConnectionId String?      @db.Uuid
+  name                    String       @db.VarChar(200)
+  code                    String       @db.VarChar(100)
+  type                    DeviceType   @default(OTHER)
+  status                  DeviceStatus @default(UNKNOWN)
+  isActive                Boolean      @default(true)
+  lastSeenAt              DateTime?    @db.Timestamptz(3)
+  offlineAfterSeconds     Int          @default(120)
+  firmwareVersion         String?      @db.VarChar(100)
+  metadata                Json?
+  createdAt               DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime     @updatedAt @db.Timestamptz(3)
+
+  organization          Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  site                  Site                   @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  zone                  Zone                   @relation(fields: [zoneId], references: [id], onDelete: Restrict)
+  heatingCircuit        HeatingCircuit?        @relation(fields: [heatingCircuitId], references: [id], onDelete: SetNull)
+  integrationConnection IntegrationConnection? @relation(fields: [integrationConnectionId], references: [id], onDelete: SetNull)
+  channels              DeviceChannel[]
+  credentials           DeviceCredential[]
+  statusHistory         DeviceStatusHistory[]
+  rfidReader            RfidReader?
+
+  @@unique([organizationId, code])
+  @@index([organizationId, status, isActive])
+  @@index([siteId, zoneId])
+  @@index([zoneId, isActive])
+  @@index([lastSeenAt])
+  @@map("devices")
+}
+
+model DeviceCredential {
+  id         String    @id @default(uuid()) @db.Uuid
+  deviceId   String    @db.Uuid
+  name       String    @db.VarChar(100)
+  secretHash String    @db.VarChar(255)
+  expiresAt  DateTime? @db.Timestamptz(3)
+  revokedAt  DateTime? @db.Timestamptz(3)
+  lastUsedAt DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, revokedAt])
+  @@map("device_credentials")
+}
+
+model DeviceStatusHistory {
+  id        String       @id @default(uuid()) @db.Uuid
+  deviceId  String       @db.Uuid
+  status    DeviceStatus
+  changedAt DateTime     @default(now()) @db.Timestamptz(3)
+  reason    String?      @db.VarChar(500)
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId, changedAt(sort: Desc)])
+  @@map("device_status_history")
+}
+
+model DeviceChannel {
+  id              String          @id @default(uuid()) @db.Uuid
+  organizationId  String          @db.Uuid
+  deviceId        String          @db.Uuid
+  code            String          @db.VarChar(100)
+  name            String          @db.VarChar(200)
+  measurementKind MeasurementKind @default(OTHER)
+  dataType        ChannelDataType @default(NUMBER)
+  unit            String?         @db.VarChar(30)
+  isActive        Boolean         @default(true)
+  // Интерпретация дискретного контакта задаётся конфигурацией, а не кодом.
+  trueMeaning     String?         @db.VarChar(100)
+  falseMeaning    String?         @db.VarChar(100)
+  createdAt       DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime        @updatedAt @db.Timestamptz(3)
+
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  device       Device                  @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  recording    ChannelRecordingPolicy?
+  telemetry    TelemetryRecord[]
+  threshold    ChannelThreshold?
+  events       MonitoringEvent[]
+
+  @@unique([deviceId, code])
+  @@index([organizationId, measurementKind, isActive])
+  @@index([deviceId, isActive])
+  @@map("device_channels")
+}
+
+// Для температуры устанавливается INTERVAL_AND_CHANGE. Для других каналов
+// можно выбрать подходящий режим; CHECK-ограничение — в SQL-файле.
+model ChannelRecordingPolicy {
+  id               String        @id @default(uuid()) @db.Uuid
+  channelId        String        @unique @db.Uuid
+  mode             RecordingMode @default(INTERVAL_AND_CHANGE)
+  intervalSeconds  Int?
+  changeThreshold  Decimal?      @db.Decimal(14, 4)
+  recordFirstValue Boolean       @default(true)
+  enabled          Boolean       @default(true)
+  updatedAt        DateTime      @updatedAt @db.Timestamptz(3)
+
+  channel DeviceChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@map("channel_recording_policies")
+}
+
+// recordedAt — время измерения на устройстве; receivedAt — время приёма API.
+// Числовое и логическое значения взаимоисключающие (SQL CHECK).
+model TelemetryRecord {
+  id              BigInt           @id @default(autoincrement())
+  channelId       String           @db.Uuid
+  recordedAt      DateTime         @db.Timestamptz(3)
+  receivedAt      DateTime         @default(now()) @db.Timestamptz(3)
+  numberValue     Decimal?         @db.Decimal(14, 4)
+  booleanValue    Boolean?
+  quality         TelemetryQuality @default(GOOD)
+  sourceMessageId String?          @db.VarChar(160)
+  rawPayload      Json?
+
+  channel DeviceChannel @relation(fields: [channelId], references: [id], onDelete: Restrict)
+
+  @@unique([channelId, sourceMessageId])
+  @@index([channelId, recordedAt(sort: Desc)])
+  @@index([receivedAt])
+  @@map("telemetry_records")
+}
+
+model ChannelThreshold {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  channelId      String   @unique @db.Uuid
+  warningLow     Decimal? @db.Decimal(14, 4)
+  warningHigh    Decimal? @db.Decimal(14, 4)
+  criticalLow    Decimal? @db.Decimal(14, 4)
+  criticalHigh   Decimal? @db.Decimal(14, 4)
+  hysteresis     Decimal  @default(0) @db.Decimal(14, 4)
+  enabled        Boolean  @default(true)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  channel      DeviceChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, enabled])
+  @@map("channel_thresholds")
+}
+
+model MonitoringEvent {
+  id                   String        @id @default(uuid()) @db.Uuid
+  organizationId       String        @db.Uuid
+  zoneId               String?       @db.Uuid
+  channelId            String?       @db.Uuid
+  type                 EventType
+  severity             EventSeverity
+  status               EventStatus   @default(ACTIVE)
+  title                String        @db.VarChar(250)
+  description          String?       @db.Text
+  valueAtTrigger       Decimal?      @db.Decimal(14, 4)
+  startedAt            DateTime      @default(now()) @db.Timestamptz(3)
+  acknowledgedAt       DateTime?     @db.Timestamptz(3)
+  acknowledgedByUserId String?       @db.Uuid
+  resolvedAt           DateTime?     @db.Timestamptz(3)
+  deduplicationKey     String?       @db.VarChar(200)
+  metadata             Json?
+
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  zone           Zone?                  @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  channel        DeviceChannel?         @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  acknowledgedBy User?                  @relation("EventAcknowledgedBy", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
+  history        EventHistory[]
+  deliveries     NotificationDelivery[]
+
+  @@index([organizationId, status, startedAt(sort: Desc)])
+  @@index([zoneId, status, startedAt(sort: Desc)])
+  @@index([channelId, startedAt(sort: Desc)])
+  @@index([type, status])
+  @@index([deduplicationKey])
+  @@map("monitoring_events")
+}
+
+model EventHistory {
+  id          String       @id @default(uuid()) @db.Uuid
+  eventId     String       @db.Uuid
+  fromStatus  EventStatus?
+  toStatus    EventStatus
+  comment     String?      @db.Text
+  changedById String?      @db.Uuid
+  changedAt   DateTime     @default(now()) @db.Timestamptz(3)
+
+  event MonitoringEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, changedAt])
+  @@map("event_history")
+}
+
+model RfidReader {
+  id        String   @id @default(uuid()) @db.Uuid
+  deviceId  String   @unique @db.Uuid
+  name      String   @db.VarChar(200)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  device      Device       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  inspections Inspection[]
+
+  @@map("rfid_readers")
+}
+
+model RfidCard {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  cardUid        String    @db.VarChar(100)
+  label          String?   @db.VarChar(200)
+  userId         String?   @db.Uuid
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  revokedAt      DateTime? @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, cardUid])
+  @@index([organizationId, isActive])
+  @@map("rfid_cards")
+}
+
+model InspectionRule {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  zoneId          String   @db.Uuid
+  name            String   @db.VarChar(200)
+  intervalMinutes Int
+  graceMinutes    Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  zone         Zone         @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  inspections  Inspection[]
+
+  @@index([organizationId, zoneId, isActive])
+  @@map("inspection_rules")
+}
+
+model Inspection {
+  id            String           @id @default(uuid()) @db.Uuid
+  ruleId        String           @db.Uuid
+  zoneId        String           @db.Uuid
+  userId        String?          @db.Uuid
+  readerId      String?          @db.Uuid
+  method        InspectionMethod
+  status        InspectionStatus @default(COMPLETED)
+  cardUid       String?          @db.VarChar(100)
+  inspectedAt   DateTime         @default(now()) @db.Timestamptz(3)
+  comment       String?          @db.Text
+  sourceEventId String?          @db.VarChar(160)
+
+  rule   InspectionRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  user   User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  reader RfidReader?    @relation(fields: [readerId], references: [id], onDelete: SetNull)
+
+  @@unique([readerId, sourceEventId])
+  @@index([ruleId, inspectedAt(sort: Desc)])
+  @@index([zoneId, inspectedAt(sort: Desc)])
+  @@index([userId, inspectedAt(sort: Desc)])
+  @@map("inspections")
+}
+
+model TelegramAccount {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @unique @db.Uuid
+  chatId     String    @unique @db.VarChar(40)
+  verifiedAt DateTime? @db.Timestamptz(3)
+  isEnabled  Boolean   @default(true)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("telegram_accounts")
+}
+
+model NotificationDelivery {
+  id             String              @id @default(uuid()) @db.Uuid
+  organizationId String              @db.Uuid
+  eventId        String?             @db.Uuid
+  userId         String              @db.Uuid
+  channel        NotificationChannel
+  status         DeliveryStatus      @default(PENDING)
+  attempts       Int                 @default(0)
+  scheduledAt    DateTime            @default(now()) @db.Timestamptz(3)
+  sentAt         DateTime?           @db.Timestamptz(3)
+  lastError      String?             @db.Text
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  event        MonitoringEvent? @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([eventId])
+  @@map("notification_deliveries")
+}
+
+model AuditLog {
+  id             BigInt      @id @default(autoincrement())
+  organizationId String?     @db.Uuid
+  userId         String?     @db.Uuid
+  action         AuditAction
+  entityType     String      @db.VarChar(100)
+  entityId       String?     @db.VarChar(100)
+  ipAddress      String?     @db.VarChar(45)
+  userAgent      String?     @db.VarChar(500)
+  details        Json?
+  createdAt      DateTime    @default(now()) @db.Timestamptz(3)
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
 }
