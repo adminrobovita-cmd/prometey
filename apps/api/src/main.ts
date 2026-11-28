@@ -8,6 +8,6 @@ async function bootstrap() {
 
   await app.listen(port);
 
-  console.log('ПРОМЕТЕЙ Backend запущен: http://localhost:${port}');
+  console.log("ПРОМЕТЕЙ Backend запущен: http://localhost:${port}");
 }
 void bootstrap();
